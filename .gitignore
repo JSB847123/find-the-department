@@ -1,0 +1,6 @@
+.env.local
+.env.local.tmp
+data/
+__pycache__/
+output/
+.venv/

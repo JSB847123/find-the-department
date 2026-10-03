@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>부서 찾기 · 지방소득세</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a href="/" class="brand"><span class="brand-icon">部</span><span>부서 찾기<small>지방소득세 업무 도구</small></span></a>
+    <div class="nav-label">작업 공간</div>
+    <button class="nav active" id="nav-search"><span>⌕</span>부서 조회</button>
+    <button class="nav" id="nav-saved"><span>▤</span>확인한 수신처 <b id="saved-count">0</b></button>
+    <div class="sidebar-bottom">
+      <div class="connection"><i id="connection-dot"></i><span id="connection-label">연결 확인 중</span></div>
+      <button class="nav" id="settings-open"><span>⚙</span>API 설정</button>
+      <p>이 컴퓨터에서 실행 중<br>조회 결과는 로컬에 저장됩니다.</p>
+      <span class="version">LOCAL WORKSPACE · V0.2</span>
+    </div>
+  </aside>
+
+  <main>
+    <header class="page-header">
+      <div><div class="eyebrow">세입 이체 / 수신처 확인</div><h1 id="page-title">지방소득세 담당 부서 찾기</h1><p id="page-description">지자체 목록을 넣고, 공식 홈페이지의 업무안내와 조직도를 확인하세요.</p></div>
+      <span class="local-badge"><i></i>내 컴퓨터</span>
+    </header>
+    <div id="notice" class="notice" hidden></div>
+
+    <section class="workspace">
+      <section class="input-panel" id="input-panel">
+        <div class="section-number">01 <span>조회 대상</span></div>
+        <div class="input-tabs"><button id="tab-file" class="active">엑셀 업로드</button><button id="tab-paste">직접 입력</button></div>
+        <div id="file-pane">
+          <label class="upload-area" id="drop-zone" for="upload">
+            <svg viewBox="0 0 40 40" width="38" height="38" fill="none" aria-hidden="true"><path d="M12 5h12l7 7v23H9V5h3Z" stroke="currentColor" stroke-width="1.5"/><path d="M23 5v8h8M14 20h12M14 26h12M20 17v12" stroke="currentColor" stroke-width="1.5"/></svg>
+            <strong id="upload-label">엑셀 파일 선택</strong><span>여기로 파일을 끌어 놓으세요</span><small>.xlsx · .csv · .tsv / 최대 10MB</small>
+          </label>
+          <input type="file" id="upload" accept=".xlsx,.csv,.tsv" hidden>
+          <div id="mapping" hidden>
+            <label>시트<select id="sheet"></select></label>
+            <div class="two-fields"><label>제목 행<input id="header-row" type="number" min="0" max="10000" value="1"></label><label>지자체 열<select id="location-column"></select></label></div>
+            <label>시·도 열 <span class="optional">선택</span><select id="province-column"></select></label>
+            <label>공식 홈페이지 URL 열 <span class="optional">선택</span><select id="url-column"></select></label>
+            <p class="help">이름이 두 열에 나뉘어 있으면 시·도 열을 함께 선택하세요. 제목이 없는 파일은 제목 행을 0으로 입력하세요.</p>
+          </div>
+        </div>
+        <div id="paste-pane" hidden>
+          <label for="locations">시·도를 포함한 지자체 이름</label>
+          <textarea id="locations" rows="9" placeholder="전남광주통합특별시 서구&#10;서울특별시 강남구&#10;경기도 수원시"></textarea>
+          <p class="help">한 줄에 한 지자체씩 입력하거나 엑셀에서 복사해 붙여넣으세요.</p>
+        </div>
+        <div class="target-summary"><strong id="target-count">0</strong><span>개 지자체</span><small id="duplicate-note">최대 100개 / 중복 자동 제외</small></div>
+        <div id="preview" class="preview"><span>파일을 올리면 조회 목록이 표시됩니다.</span></div>
+        <label>찾을 업무<select id="kind"><option value="all">개인·법인 지방소득세 전반</option><option value="personal">개인 지방소득세</option><option value="corporate">법인 지방소득세</option><option value="special">특별징수분 지방소득세</option></select></label>
+        <button class="primary search-button" id="search-start" disabled><span>⌕</span>담당 부서 조회</button>
+        <button class="quiet" id="sample">서구 예제로 시작</button>
+        <p class="input-footnote">공식 업무안내 URL이 있으면 API 없이도 조회할 수 있습니다. 서구 예제는 공식 조직도부터 조회합니다.</p>
+      </section>
+
+      <section class="results-panel">
+        <div class="results-top"><div class="section-number">02 <span id="result-label">조회 결과</span></div><div class="export-actions"><button class="secondary" id="copy-recipients" disabled>수신처 복사</button><button class="secondary" id="export" disabled>CSV 저장 ↓</button></div></div>
+        <div class="results-summary"><span><b id="result-total">0</b>전체</span><span><b id="result-found">0</b>후보 발견</span><span><b id="result-review">0</b>검토 필요</span><span class="confirmed-stat"><b id="result-confirmed">0</b>사용자 확인</span></div>
+        <div class="progress-area" id="progress-area" hidden><div><span id="progress-text">조회 준비 중</span><button id="cancel" class="quiet">조회 중지</button></div><progress id="progress" value="0" max="100"></progress></div>
+        <div class="table-toolbar"><div class="filter-tabs" id="filters"><button class="active" data-filter="all">전체</button><button data-filter="review">검토 필요</button><button data-filter="confirmed">확인 완료</button></div><input id="result-search" placeholder="지자체·부서 검색" aria-label="조회 결과 검색"></div>
+        <div class="table-scroll"><table><thead><tr><th>지자체</th><th>상위 국 / 담당 부서</th><th>상태</th><th>근거</th></tr></thead><tbody id="result-rows"></tbody></table>
+          <div class="empty" id="empty"><div class="empty-symbol">⌕</div><h2>조회할 지자체를 추가하세요</h2><p>엑셀의 지자체 목록에서<br>공문을 보낼 담당 부서를 찾습니다.</p><div class="flow"><span>목록 입력</span><i>→</i><span>공식 자료 조회</span><i>→</i><span>수신처 확인</span></div></div>
+        </div>
+        <div class="results-footer"><span id="footer-status">조회 전</span><span>결과를 선택하면 업무와 근거를 확인할 수 있습니다.</span></div>
+      </section>
+    </section>
+    <p class="page-footnote">자동 조회는 부서 후보를 제시합니다. 홈페이지의 조직 개편과 실제 세입 이체 담당을 확인한 뒤 수신처로 저장하세요.</p>
+  </main>
+
+  <dialog id="settings-dialog">
+    <form id="settings-form"><div class="dialog-heading"><div><div class="eyebrow">조직·검색 연결</div><h2>API 설정</h2></div><button type="button" class="close" id="settings-close" aria-label="닫기">×</button></div>
+      <label>API 종류<select id="settings-provider"><option value="public">행정안전부 기관코드 API</option><option value="naver">네이버 웹문서 검색 API</option></select></label>
+      <div id="public-settings">
+        <p>공공데이터포털에서 발급받은 <strong>일반 인증키</strong>를 입력하세요. 부서명과 상위 조직 관계를 조회합니다.</p>
+        <label>일반 인증키<input id="public-key" type="password" autocomplete="off" required></label>
+        <p class="help">Decoding 키를 권장합니다. Encoding 키도 자동 처리합니다. 담당업무는 공식 홈페이지에서 별도로 확인합니다.</p>
+        <a href="https://www.data.go.kr/data/15077870/openapi.do" target="_blank" rel="noopener noreferrer" class="text-link">기관코드 API 안내 ↗</a>
+      </div>
+      <div id="naver-settings" hidden>
+        <p>네이버 개발자센터에서 <strong>검색</strong> API를 추가한 후 입력하세요. 공식 홈페이지의 업무안내를 찾는 데 사용합니다.</p>
+        <label>Client ID<input id="client-id" type="password" autocomplete="off"></label>
+        <label>Client Secret<input id="client-secret" type="password" autocomplete="off"></label>
+        <a href="https://developers.naver.com/apps/#/register" target="_blank" rel="noopener noreferrer" class="text-link">네이버 애플리케이션 등록 ↗</a>
+      </div>
+      <p class="help">키는 이 컴퓨터의 .env.local에 저장되며 화면에 다시 표시하지 않습니다. 다른 API 설정은 함께 유지됩니다.</p>
+      <div class="form-error" id="settings-error" role="alert"></div><button class="primary" type="submit" id="settings-save">저장 및 연결 확인</button>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" class="detail-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">업무·조직 근거 확인</div><h2 id="detail-title"></h2></div><button class="close" id="detail-close" aria-label="닫기">×</button></div>
+    <div id="detail-notes" class="detail-notes"></div>
+    <p id="detail-time" class="help"></p>
+    <label>담당 업무 후보<select id="candidate-select"></select></label>
+    <div id="duty-summary" class="duty-summary"></div>
+    <div id="evidence" class="evidence"></div>
+    <form id="confirm-form">
+      <div class="edit-heading">공문 수신처 확인 <span>필요한 항목은 수정할 수 있습니다.</span></div>
+      <label>공식 기관명<input id="canonical" required maxlength="100"></label>
+      <div class="two-fields"><label>상위 국<input id="bureau" placeholder="근거가 없으면 비워 둠"></label><label>담당 부서<input id="department" required></label></div>
+      <div class="two-fields"><label>팀<input id="team"></label><label>전화번호<input id="phone"></label></div>
+      <label>확인 근거 URL<input id="source-url" type="url" required placeholder="https://공식홈페이지/업무안내"></label>
+      <div class="recipient-preview"><span>수신처</span><strong id="recipient-preview">기관명(담당 부서)</strong></div>
+      <label class="checkbox-label"><input type="checkbox" id="verified" required><span>근거를 확인했고, 이 부서를 수신처로 사용합니다.</span></label>
+      <div id="confirm-error" class="form-error" role="alert"></div><button class="primary" id="confirm-save">확인한 수신처 저장</button>
+    </form>
+    <div class="manual-retry"><label>공식 조직도·업무안내 URL로 다시 조회<input id="retry-url" type="url" placeholder="https://..."></label><button class="secondary" id="retry">이 URL로 조회</button><a id="manual-search" class="text-link" target="_blank" rel="noopener noreferrer">직접 검색 ↗</a></div>
+  </dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>
