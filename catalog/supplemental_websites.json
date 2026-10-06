@@ -1,0 +1,317 @@
+{
+  "description": "공식 시·구청 링크 및 공개 자료에서 확인한 일반구 홈페이지 주소. 접속과 담당업무 확인 상태는 조회 시 별도 표시합니다.",
+  "websites": [
+    {
+      "name": "경기도 고양시 덕양구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.goyang.go.kr/dygu/index.do",
+      "aliases": [],
+      "source_url": "https://www.goyang.go.kr/www/index.do"
+    },
+    {
+      "name": "경기도 고양시 일산동구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.goyang.go.kr/ilsegu/index.do",
+      "aliases": [],
+      "source_url": "https://www.goyang.go.kr/www/index.do"
+    },
+    {
+      "name": "경기도 고양시 일산서구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.goyang.go.kr/ilswgu/index.do",
+      "aliases": [],
+      "source_url": "https://www.goyang.go.kr/www/index.do"
+    },
+    {
+      "name": "경기도 부천시 소사구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://sosa.bucheon.go.kr/site/main/index171",
+      "aliases": [],
+      "source_url": "https://www.bucheon.go.kr/site/main/index148"
+    },
+    {
+      "name": "경기도 부천시 오정구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://ojeong.bucheon.go.kr/site/main/index169",
+      "aliases": [],
+      "source_url": "https://www.bucheon.go.kr/site/main/index148"
+    },
+    {
+      "name": "경기도 부천시 원미구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://wonmi.bucheon.go.kr/site/main/index170",
+      "aliases": [],
+      "source_url": "https://www.bucheon.go.kr/site/main/index148"
+    },
+    {
+      "name": "경기도 성남시 분당구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "http://bundang-gu.go.kr/",
+      "aliases": [],
+      "source_url": "https://snvision.seongnam.go.kr/data/snvision/pdf/201612/2016122621378838.pdf"
+    },
+    {
+      "name": "경기도 성남시 수정구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.sujeong-gu.go.kr/main/index.asp",
+      "aliases": [],
+      "source_url": "https://www.sujeong-gu.go.kr/sub/content.asp?cIdx=19"
+    },
+    {
+      "name": "경기도 성남시 중원구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.jungwongu.go.kr/",
+      "aliases": [],
+      "source_url": "https://www.jungwongu.go.kr/download/2017%EB%85%84%EC%A3%BC%EC%9A%94%EC%97%85%EB%AC%B4%EA%B3%84%ED%9A%8D.pdf"
+    },
+    {
+      "name": "경기도 수원시 권선구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "http://ksun.suwon.go.kr/",
+      "aliases": [],
+      "source_url": "https://paldal.suwon.go.kr/"
+    },
+    {
+      "name": "경기도 수원시 영통구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "http://yt.suwon.go.kr/",
+      "aliases": [],
+      "source_url": "https://paldal.suwon.go.kr/"
+    },
+    {
+      "name": "경기도 수원시 장안구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "http://jangan.suwon.go.kr/",
+      "aliases": [],
+      "source_url": "https://paldal.suwon.go.kr/"
+    },
+    {
+      "name": "경기도 수원시 팔달구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://paldal.suwon.go.kr/",
+      "aliases": [],
+      "source_url": "https://paldal.suwon.go.kr/"
+    },
+    {
+      "name": "경기도 안산시 단원구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.ansan.go.kr/danwongu/main/main.do",
+      "aliases": [],
+      "source_url": "https://www.ansan.go.kr/www/main/main.do"
+    },
+    {
+      "name": "경기도 안산시 상록구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.ansan.go.kr/sangnokgu/main/main.do",
+      "aliases": [],
+      "source_url": "https://www.ansan.go.kr/www/main/main.do"
+    },
+    {
+      "name": "경기도 안양시 동안구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.anyang.go.kr/dongan/index.do",
+      "aliases": [],
+      "source_url": "https://www.anyang.go.kr/main/contents.do?key=313"
+    },
+    {
+      "name": "경기도 안양시 만안구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://anyang.go.kr/manan/index.do",
+      "aliases": [],
+      "source_url": "https://www.anyang.go.kr/main/contents.do?key=313"
+    },
+    {
+      "name": "경기도 용인시 기흥구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.giheunggu.go.kr/",
+      "aliases": [],
+      "source_url": "https://www.sujigu.go.kr/lmth/04life0502.asp"
+    },
+    {
+      "name": "경기도 용인시 수지구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.sujigu.go.kr/",
+      "aliases": [],
+      "source_url": "https://www.sujigu.go.kr/lmth/04life0502.asp"
+    },
+    {
+      "name": "경기도 용인시 처인구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.cheoingu.go.kr/",
+      "aliases": [],
+      "source_url": "https://www.sujigu.go.kr/lmth/04life0502.asp"
+    },
+    {
+      "name": "경기도 화성시 동탄구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.hscity.go.kr/dongtan/index.do",
+      "aliases": [],
+      "source_url": "https://www.hscity.go.kr/office/intro.jsp"
+    },
+    {
+      "name": "경기도 화성시 만세구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.hscity.go.kr/manse/index.do",
+      "aliases": [],
+      "source_url": "https://www.hscity.go.kr/office/intro.jsp"
+    },
+    {
+      "name": "경기도 화성시 병점구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.hscity.go.kr/byeongjeom/index.do",
+      "aliases": [],
+      "source_url": "https://www.hscity.go.kr/office/intro.jsp"
+    },
+    {
+      "name": "경기도 화성시 효행구",
+      "region": "경기도",
+      "level": "일반구",
+      "url": "https://www.hscity.go.kr/hyohaeng/index.do",
+      "aliases": [],
+      "source_url": "https://www.hscity.go.kr/office/intro.jsp"
+    },
+    {
+      "name": "경상남도 창원시 마산합포구",
+      "region": "경상남도",
+      "level": "일반구",
+      "url": "https://www.changwon.go.kr/cwportal/gu/11099.web",
+      "aliases": [],
+      "source_url": "https://www.changwon.go.kr/cwportal/gu.web"
+    },
+    {
+      "name": "경상남도 창원시 마산회원구",
+      "region": "경상남도",
+      "level": "일반구",
+      "url": "https://www.changwon.go.kr/cwportal/gu/11100.web",
+      "aliases": [],
+      "source_url": "https://www.changwon.go.kr/cwportal/gu.web"
+    },
+    {
+      "name": "경상남도 창원시 성산구",
+      "region": "경상남도",
+      "level": "일반구",
+      "url": "https://www.changwon.go.kr/cwportal/gu/11098.web",
+      "aliases": [],
+      "source_url": "https://www.changwon.go.kr/cwportal/gu.web"
+    },
+    {
+      "name": "경상남도 창원시 의창구",
+      "region": "경상남도",
+      "level": "일반구",
+      "url": "https://www.changwon.go.kr/cwportal/gu/11094.web",
+      "aliases": [],
+      "source_url": "https://www.changwon.go.kr/cwportal/gu.web"
+    },
+    {
+      "name": "경상남도 창원시 진해구",
+      "region": "경상남도",
+      "level": "일반구",
+      "url": "https://www.changwon.go.kr/cwportal/gu/11101.web",
+      "aliases": [],
+      "source_url": "https://www.changwon.go.kr/cwportal/gu.web"
+    },
+    {
+      "name": "경상북도 포항시 남구",
+      "region": "경상북도",
+      "level": "일반구",
+      "url": "https://www.pohang.go.kr/gu/contents.do?mid=0100000000",
+      "aliases": [],
+      "source_url": "https://www.pohang.go.kr/gu/contents.do?mid=0103020000"
+    },
+    {
+      "name": "경상북도 포항시 북구",
+      "region": "경상북도",
+      "level": "일반구",
+      "url": "https://www.pohang.go.kr/gu/contents.do?mid=0200000000",
+      "aliases": [],
+      "source_url": "https://www.pohang.go.kr/gu/contents.do?mid=0103020000"
+    },
+    {
+      "name": "전북특별자치도 전주시 덕진구",
+      "region": "전북특별자치도",
+      "level": "일반구",
+      "url": "https://www.jeonju.go.kr/deokjingu/index.9is",
+      "aliases": [],
+      "source_url": "https://www.jeonju.go.kr/"
+    },
+    {
+      "name": "전북특별자치도 전주시 완산구",
+      "region": "전북특별자치도",
+      "level": "일반구",
+      "url": "https://www.jeonju.go.kr/wansangu/index.9is",
+      "aliases": [],
+      "source_url": "https://www.jeonju.go.kr/"
+    },
+    {
+      "name": "충청남도 천안시 동남구",
+      "region": "충청남도",
+      "level": "일반구",
+      "url": "https://www.cheonan.go.kr/dongnam.do",
+      "aliases": [],
+      "source_url": "https://www.cheonan.go.kr/kor.do"
+    },
+    {
+      "name": "충청남도 천안시 서북구",
+      "region": "충청남도",
+      "level": "일반구",
+      "url": "https://www.cheonan.go.kr/seobuk.do",
+      "aliases": [],
+      "source_url": "https://www.cheonan.go.kr/kor.do"
+    },
+    {
+      "name": "충청북도 청주시 상당구",
+      "region": "충청북도",
+      "level": "일반구",
+      "url": "https://www.cheongju.go.kr/sangdang/index.do",
+      "aliases": [],
+      "source_url": "https://www.cheongju.go.kr/www/index.do"
+    },
+    {
+      "name": "충청북도 청주시 서원구",
+      "region": "충청북도",
+      "level": "일반구",
+      "url": "https://www.cheongju.go.kr/seowon/index.do",
+      "aliases": [],
+      "source_url": "https://www.cheongju.go.kr/www/index.do"
+    },
+    {
+      "name": "충청북도 청주시 청원구",
+      "region": "충청북도",
+      "level": "일반구",
+      "url": "https://www.cheongju.go.kr/cheongwon/index.do",
+      "aliases": [],
+      "source_url": "https://www.cheongju.go.kr/www/index.do"
+    },
+    {
+      "name": "충청북도 청주시 흥덕구",
+      "region": "충청북도",
+      "level": "일반구",
+      "url": "https://www.cheongju.go.kr/heungdeok/index.do",
+      "aliases": [],
+      "source_url": "https://www.cheongju.go.kr/www/index.do"
+    }
+  ]
+}

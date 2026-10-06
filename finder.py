@@ -17,19 +17,22 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
+from pathlib import Path
 
 KST = timezone(timedelta(hours=9))
 TAX = re.compile(r"지방\s*소득세")
-DEPT = re.compile(r"(?:세무[0-9일이삼]*과|세정과|세정담당관|세입관리과|징수과|세무관리과|재무과|재정과|회계세무과|재무세무과|재정세무과|세무징수과|세원관리과|세원정보과|세정징수과|세정[0-9]*과)")
+DEPT = re.compile(r"(?:지방소득세과|지방세과|세무[0-9일이삼]*과|세정과|세정담당관|세입관리과|징수과|세무관리과|재무과|재정과|회계세무과|재무세무과|재정세무과|세무징수과|세원관리과|세원정보과|세정징수과|세정[0-9]*과)")
 BUREAU = re.compile(r"[가-힣]{2,16}국")
 PHONE = re.compile(r"0\d{1,2}[-) ]\s*\d{3,4}[- ]\d{4}")
 PROVINCES = ["seoul", "busan", "daegu", "incheon", "gwangju", "daejeon", "ulsan", "gyeonggi", "gangwon", "chungbuk", "chungnam", "jeonbuk", "jeonnam", "gyeongbuk", "gyeongnam", "jeju", "sejong"]
-REGION_WORDS = {"서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구", "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전", "울산광역시": "울산", "경기도": "경기", "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북", "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북", "전라남도": "전남", "경상북도": "경북", "경상남도": "경남", "제주특별자치도": "제주", "세종특별자치시": "세종"}
+REGION_WORDS = {"서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구", "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전", "울산광역시": "울산", "경기도": "경기", "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북", "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북", "전라남도": "전남", "전남광주통합특별시": "전남광주", "경상북도": "경북", "경상남도": "경남", "제주특별자치도": "제주", "제주도": "제주", "세종특별자치시": "세종"}
 # Homepage discovery hints, not department answers. Both names must still be
 # checked against current page identity; aliases are not nationwide rewrites.
 HINTS = [
     {"name": "전남광주통합특별시 서구", "aliases": ["광주광역시 서구", "광주 서구", "광주서구"], "url": "https://www.seogu.gwangju.kr/", "org": "https://www.seogu.gwangju.kr/menu.es?mid=a10106030000"},
     {"name": "인천광역시 부평구", "aliases": ["인천 부평구", "인천 부평", "인천광역시 부평"], "url": "https://www.icbp.go.kr/", "org": "https://www.icbp.go.kr/main/introduction/guidance/organization.jsp"},
+    {"name": "대전광역시 서구", "aliases": ["대전 서구"], "url": "https://www.seogu.go.kr/", "org": "https://www.seogu.go.kr/kor/sub05_03_01.do"},
+    {"name": "서울특별시 강남구", "aliases": ["서울 강남구"], "url": "https://www.gangnam.go.kr/", "org": "https://www.gangnam.go.kr/dept/user/find.do?mid=ID06_040603"},
 ]
 
 
@@ -42,15 +45,33 @@ def compact(value):
 
 
 def location_key(value):
-    result = compact(value).removesuffix("청")
+    result = compact(value).removesuffix("청").replace("특례시", "시")
     for name, alias in REGION_WORDS.items():
         result = result.replace(name, alias)
     return result
 
 
+def load_catalog_hints(specific):
+    path = Path(__file__).resolve().parent / "catalog" / "websites.json"
+    if not path.exists():
+        return specific
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entries = {location_key(e["name"]): {**e, "org": e.get("org") or e["url"]} for e in data["websites"]}
+    for entry in specific:
+        key = location_key(entry["name"])
+        base = entries.get(key, {})
+        entries[key] = {**base, **entry, "aliases": list(dict.fromkeys([*base.get("aliases", []), *entry["aliases"]]))}
+    return list(entries.values())
+
+
+HINTS = load_catalog_hints(HINTS)
+CATALOG_HOSTS = {host for h in HINTS for host in (urllib.parse.urlsplit(h["url"]).hostname, urllib.parse.urlsplit(h["org"]).hostname) if host}
+CATALOG_HOSTS |= {h.removeprefix("www.") for h in CATALOG_HOSTS}
+
+
 def official_host(host):
     host = (host or "").lower().rstrip(".")
-    return host.endswith((".go.kr", ".gov.kr")) or any(host.endswith("." + p + ".kr") for p in PROVINCES)
+    return host in CATALOG_HOSTS or host.endswith((".go.kr", ".gov.kr")) or any(host.endswith("." + p + ".kr") for p in PROVINCES)
 
 
 def validate_url(url, api=False):
@@ -160,6 +181,13 @@ class Page(HTMLParser):
     def links(self, url):
         for n in self.root.walk("a"):
             href = n.attrs.get("href", "")
+            # This site's organization chart has explicit department IDs in
+            # click handlers. Read those IDs without executing site scripts.
+            if urllib.parse.urlsplit(url).hostname in ("www.gangnam.go.kr", "gangnam.go.kr"):
+                match = re.fullmatch(r"ajaxRequest\('([0-9]{7})',''\);?", n.attrs.get("onclick", "").strip())
+                if match and DEPT.fullmatch(compact(n.text())):
+                    yield n.text(), urllib.parse.urljoin(url, "/dept/info/view.do?ndi_dept_id=" + match[1]), n
+                    continue
             if href and not href.startswith(("#", "javascript:", "mailto:", "tel:")):
                 yield n.text(), urllib.parse.urljoin(url, href), n
 
@@ -191,8 +219,30 @@ def content_root(page):
     return options[0] if options else page.root
 
 
+def landing_redirect(page, url):
+    # Read literal navigation instructions from a landing page. Do not run
+    # scripts or infer conditional redirects. Follow only the same hostname.
+    destinations = []
+    for node in page.root.walk("meta"):
+        if node.attrs.get("http-equiv", "").lower() == "refresh":
+            match = re.fullmatch(r"\s*\d+\s*;\s*url\s*=\s*['\"]?([^'\"]+)['\"]?\s*", node.attrs.get("content", ""), re.I)
+            if match:
+                destinations.append(match[1].strip())
+    if not destinations and len(page.root.text()) < 300:
+        for node in page.root.walk("script"):
+            script = "".join(c for c in node.children if isinstance(c, str))
+            match = re.fullmatch(r"\s*(?:window\.)?location(?:\.href)?\s*=\s*['\"]([^'\"]+)['\"];?\s*", script)
+            if match:
+                destinations.append(match[1])
+    for destination in destinations:
+        link = urllib.parse.urljoin(url, destination)
+        if urllib.parse.urlsplit(link).hostname == urllib.parse.urlsplit(url).hostname and link != url:
+            return link
+    return ""
+
+
 def department_team_heading(text):
-    match = re.fullmatch(rf"({DEPT.pattern})[>›→/]([가-힣]{{2,12}}팀)", compact(text))
+    match = re.fullmatch(rf"({DEPT.pattern})[>›→/]([가-힣0-9]{{2,12}}팀)", compact(text))
     return match.groups() if match else ("", "")
 
 
@@ -218,7 +268,7 @@ def table_context(node):
             dept, team = department_team_heading(text)
             if dept:
                 return dept, team
-            if sibling.tag in ("h2", "h3", "h4", "h5", "h6") and re.fullmatch(r"[가-힣]{2,12}팀", compact(text)):
+            if sibling.tag in ("h2", "h3", "h4", "h5", "h6") and re.fullmatch(r"[가-힣0-9]{2,12}팀", compact(text)):
                 return "", compact(text)
         scope = scope.parent
     return "", ""
@@ -259,7 +309,7 @@ def extract_candidates(page, url, department_hint="", bureau_hint="", kind="all"
         text = re.sub(r"\s+", " ", node.text())
         if not TAX.search(text) or len(text) > 1700:
             continue
-        if department_team_heading(text)[0] or re.fullmatch(r"[가-힣]{2,12}팀", compact(text)):
+        if department_team_heading(text)[0] or re.fullmatch(r"[가-힣0-9]{2,12}팀", compact(text)):
             continue  # A team heading is not an employee's duty description.
         parent = node.parent
         in_nav = False
@@ -279,7 +329,7 @@ def extract_candidates(page, url, department_hint="", bureau_hint="", kind="all"
         if not dept:
             continue
         phones = PHONE.findall(text)
-        teams = [local_team] if local_team else re.findall(r"[가-힣]{2,12}팀", text)
+        teams = [local_team] if local_team else re.findall(r"[가-힣0-9]{2,12}팀", text)
         if not teams:
             scope = node.parent
             for _ in range(5):
@@ -287,13 +337,13 @@ def extract_candidates(page, url, department_hint="", bureau_hint="", kind="all"
                     break
                 headings = [h.text() for h in scope.walk("h3")]
                 if len(headings) == 1 and sum(1 for _ in scope.walk("table")) <= 1:
-                    teams = re.findall(r"[가-힣]{2,12}팀", headings[0])
+                    teams = re.findall(r"[가-힣0-9]{2,12}팀", headings[0])
                     break
                 scope = scope.parent
         cells = [c for c in node.children if isinstance(c, Node) and c.tag == "td"]
         duty = cells[-1].text() if len(cells) >= 3 else text
         score = 3 + (3 if node.tag == "tr" else 0) + (2 if phones else 0)
-        if re.search(r"지방소득세(?:팀)?\s*(?:업무\s*)?(?:전반|총괄)", text):
+        if re.search(r"지방소득세(?:[0-9]*팀|과)?\s*(?:업무\s*)?(?:전반|총괄)", text):
             score += 4
         if any(w in text for w in ("세입이체", "세입 이체", "타시군", "타 시군", "자치단체간", "자치단체 간")):
             score += 6
@@ -318,16 +368,64 @@ def search(query, credentials):
         raise ValueError(f"네이버 검색 API 오류: HTTP {exc.code}") from None
 
 
-def matching_identity(location, page, hint=None):
+def within_district_scope(hint, url):
+    """Keep shared city portals within the requested general district."""
+    if not hint or hint.get("level") != "일반구":
+        return True
+    expected, actual = urllib.parse.urlsplit(hint["url"]), urllib.parse.urlsplit(url)
+    host = (expected.hostname or "").removeprefix("www.")
+    if (actual.hostname or "").removeprefix("www.") != host:
+        return True  # A different site still needs full institution identity.
+    siblings = [h for h in HINTS if h.get("level") == "일반구" and (urllib.parse.urlsplit(h["url"]).hostname or "").removeprefix("www.") == host]
+    if len(siblings) < 2:
+        return True
+    # Pohang's two districts share a path and distinguish areas by menu ID.
+    menu = urllib.parse.parse_qs(expected.query).get("mid", [""])[0]
+    if re.fullmatch(r"\d{10}", menu):
+        current = urllib.parse.parse_qs(actual.query).get("mid", [""])[0]
+        base = expected.path.rsplit("/", 1)[0] + "/"
+        return actual.path.startswith(base) and bool(re.fullmatch(r"\d{10}", current)) and current.startswith(menu[:2])
+    # Find the first path component separating sibling district portals.
+    # Handles /danwongu/main/main.do, /gu/11094.web and /dongnam.do.
+    parts = expected.path.strip("/").split("/")
+    sibling_paths = [urllib.parse.urlsplit(h["url"]).path.strip("/").split("/") for h in siblings if h["name"] != hint["name"]]
+    for index, part in enumerate(parts):
+        if all(index >= len(other) or other[index] != part for other in sibling_paths):
+            prefix = "/" + "/".join(parts[:index + 1])
+            if "." in part:
+                base = prefix.rsplit(".", 1)[0]
+                return actual.path == prefix or actual.path.startswith(base + "/")
+            return actual.path == prefix or actual.path.startswith(prefix + "/")
+    return actual.path == expected.path and actual.query == expected.query
+
+
+def matching_identity(location, page, hint=None, url=""):
     identity = page.identity()
     if hint:
-        return any(location_key(n) in location_key(identity) for n in [hint["name"], *hint["aliases"]])
+        if url and not within_district_scope(hint, url):
+            return False
+        if any(location_key(n) in location_key(identity) for n in [hint["name"], *hint["aliases"]]):
+            return True
+        # The official directory proves the region/domain relationship. Some
+        # homepages only put their unique city name in the institution header.
+        host = (urllib.parse.urlsplit(url).hostname or "").removeprefix("www.")
+        expected = (urllib.parse.urlsplit(hint["url"]).hostname or "").removeprefix("www.")
+        local = hint["name"].split()[-1]
+        unique = sum(h["name"].split()[-1] == local for h in HINTS) == 1
+        if url and host == expected and unique and hint.get("level") in ("광역", "시군구", "행정시"):
+            return location_key(local) in location_key(identity)
+        if url and host == expected and hint.get("level") == "일반구":
+            city_district = location_key(" ".join(hint["name"].split()[-2:]))
+            # The source-backed domain/path binds abbreviated district headers
+            # to their city, even when a shared portal only says "덕양구청".
+            return city_district in location_key(identity) or location_key(local) in location_key(identity)
+        return False
     return location_key(location) in location_key(identity)
 
 
 def find_department(location, credentials=("", ""), kind="all", source_url="", public_key=""):
     location = re.sub(r"\s+", " ", location).strip()
-    result = {"location": location, "canonical": location, "status": "검토 필요", "candidates": [], "notes": [], "checked_at": stamp(), "confirmed": False}
+    result = {"location": location, "canonical": location, "status": "검토 필요", "candidates": [], "notes": [], "checked_at": stamp(), "confirmed": False, "website_checks": []}
     if not location or len(location) > 100:
         result["notes"].append("지자체 이름을 확인해 주세요.")
         return result
@@ -347,56 +445,72 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
             result["notes"].append("공식 지자체 홈페이지 주소를 입력해 주세요.")
             return result
         queue.append((source_url, "", "", True))
-    if hint:
+    if hint and not source_url:
         queue.append((hint["org"], "", "", True))
-    if all(credentials):
-        items = []
-        try:
-            for query in queries:
-                items.extend(search(query, credentials))
-            for item in items:
-                queue.append((item["url"], "", "", False))
-        except Exception as exc:
-            result["notes"].append(str(exc) if isinstance(exc, ValueError) else "검색 서버에 연결할 수 없습니다. 네트워크를 확인해 주세요.")
-    elif not hint and not source_url and not public_key:
+    result["website_source"] = source_url or (hint["org"] if hint else "")
+    search_pending = all(credentials)
+    if not search_pending and not hint and not source_url and not public_key:
         result["status"] = "API 설정 필요"
-        result["notes"].append("네이버 검색 API를 설정하거나 공식 업무안내 URL을 입력해 주세요.")
+        result["notes"].append("홈페이지 관리에서 공식 URL을 등록하거나 네이버 검색 API를 설정해 주세요.")
         return result
-    org_candidates = []
-    if public_key:
-        from public_api import OrgClient
-        try:
-            org_candidates, org_notes = OrgClient(public_key).candidates(result["canonical"])
-            result["notes"].extend(org_notes)
-        except ValueError as exc:
-            result["notes"].append(str(exc))
     visited, pages, all_candidates, relations = set(), {}, [], {}
     trusted_hosts = set()
-    while queue and len(visited) < 12:
+    while (queue or search_pending) and len(visited) < 12:
+        if not queue:
+            search_pending = False
+            # Search only supplements missing website evidence. A registered
+            # site with both duty and hierarchy needs no search API calls.
+            if any(c["department"] in relations for c in all_candidates):
+                break
+            try:
+                for query in queries:
+                    for item in search(query, credentials):
+                        queue.append((item["url"], "", "", False))
+            except Exception as exc:
+                result["notes"].append(str(exc) if isinstance(exc, ValueError) else "검색 서버에 연결할 수 없습니다. 네트워크를 확인해 주세요.")
+            if not queue:
+                break
         url, dept_hint, bureau_hint, trusted = queue.popleft()
+        url = urllib.parse.urldefrag(url)[0]
         if url in visited or re.search(r"download|\.pdf(?:\?|$)|\.hwp(?:x)?(?:\?|$)", url, re.I):
             continue
         visited.add(url)
+        check = {"url": url, "status": "조회 실패", "roles": [], "departments": [], "message": ""}
+        result["website_checks"].append(check)
         try:
             raw, final_url = request(url)
             page = Page(raw)
+            title = next(page.root.walk("title"), None)
+            check.update({"url": final_url, "title": title.text() if title else "직원 업무표"})
+            redirect = landing_redirect(page, final_url)
+            if redirect:
+                check.update({"status": "안내 페이지", "message": "같은 공식 홈페이지의 이동 안내를 따라 조회했습니다."})
+                queue.appendleft((redirect, dept_hint, bureau_hint, trusted))
+                continue
             host = urllib.parse.urlsplit(final_url).hostname
+            if not within_district_scope(hint, final_url):
+                check.update({"status": "기관 불일치", "message": "같은 시청 홈페이지의 다른 구·본청 경로이므로 결과에서 제외했습니다."})
+                continue
             # Parent-proven staff fragments have no institution header. Other
             # pages always require matching institution identity, including
             # search engine results on a generic government portal.
             if trusted and host in trusted_hosts:
                 pass
-            elif matching_identity(location, page, hint):
+            elif matching_identity(location, page, hint, final_url):
                 trusted_hosts.add(host)
             else:
+                check.update({"status": "기관 불일치", "message": "요청한 지자체의 홈페이지인지 확인되지 않아 결과에서 제외했습니다."})
                 continue
             pages[final_url] = page
             mapping = hierarchy(page, final_url)
+            duties = extract_candidates(page, final_url, dept_hint, bureau_hint, kind)
+            check.update({"status": "확인", "roles": (["조직도"] if mapping else []) + (["업무안내"] if duties else []), "departments": list(dict.fromkeys([*mapping, *(c["department"] for c in duties)]))})
             for dept, entries in mapping.items():
                 relations.setdefault(dept, []).extend(entries)
                 for entry in entries:
-                    queue.appendleft((entry["department_url"], dept, entry["bureau"], True))
-            all_candidates.extend(extract_candidates(page, final_url, dept_hint, bureau_hint, kind))
+                    if within_district_scope(hint, entry["department_url"]):
+                        queue.appendleft((entry["department_url"], dept, entry["bureau"], True))
+            all_candidates.extend(duties)
             # A specific official site's department view loads its public
             # employee table using AJAX. Follow only active department IDs.
             if host == "www.seogu.gwangju.kr" and dept_hint:
@@ -408,15 +522,18 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
             for label, link, node in page.links(final_url):
                 if urllib.parse.urlsplit(link).hostname != host:
                     continue
-                if re.search(r"조직도|행정조직|직원.*(?:안내|검색)|업무.*안내|세무.*과|세정과", label) and len(label) < 35:
+                if not within_district_scope(hint, link):
+                    continue
+                if len(label) < 35 and (re.search(r"조직도|행정조직|직원.*(?:안내|검색)|업무.*안내", label) or DEPT.fullmatch(compact(label))):
                     follow.append((link, "", "", True))
             # Organization and tax detail pages first; avoid crawling every
             # personnel page or unrelated content on a municipal portal.
             follow = list({entry[0]: entry for entry in follow}.values())
-            follow.sort(key=lambda entry: 0 if re.search(r"orgno1=|organizationView", entry[0]) else 1)
+            follow.sort(key=lambda entry: 0 if re.search(r"orgno1=|organizationView|ndi_dept_id=|deptPerson", entry[0]) else 1)
             for entry in follow[:6]:
                 queue.append(entry)
         except Exception as exc:
+            check["message"] = str(exc) if isinstance(exc, ValueError) else f"HTTP {exc.code}" if isinstance(exc, urllib.error.HTTPError) else "접속 제한 또는 네트워크 오류로 읽지 못했습니다."
             if len(result["notes"]) < 5:
                 if isinstance(exc, ValueError):
                     note = str(exc)
@@ -426,6 +543,16 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
                     note = "일부 공식 페이지를 읽지 못했습니다. 접속 제한 또는 네트워크를 확인해 주세요."
                 if note not in result["notes"]:
                     result["notes"].append(note)
+    # Organization codes supplement the website, after its current duties and
+    # organization structure have been read.
+    org_candidates = []
+    if public_key:
+        from public_api import OrgClient
+        try:
+            org_candidates, org_notes = OrgClient(public_key).candidates(result["canonical"])
+            result["notes"].extend(org_notes)
+        except ValueError as exc:
+            result["notes"].append(str(exc))
     unique = {}
     for candidate in all_candidates:
         candidate["duty_verified"] = True
@@ -466,7 +593,19 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
             result["notes"].append("홈페이지와 기관코드의 상위 국이 다릅니다. 최신 조직을 직접 확인해 주세요.")
         elif not candidate["bureau"] and not any(e["type"] == "조직 상충" for e in candidate["evidence"]):
             candidate["bureau"] = org["bureau"]
-    combined = list(unique.values()) + [c for c in org_candidates if c["org_code"] not in matched]
+    website_organizations = []
+    for dept, entries in relations.items():
+        if any(c["department"] == dept for c in unique.values()):
+            continue
+        for entry in {e["bureau"]: e for e in entries}.values():
+            evidence = {"type": "조직도", "url": entry["url"], "text": entry["evidence"]}
+            matching_orgs = [c for c in org_candidates if c["department"] == dept and c["bureau"] == entry["bureau"]]
+            if matching_orgs:
+                for c in matching_orgs:
+                    c["evidence"].append(evidence)
+            else:
+                website_organizations.append({"department": dept, "bureau": entry["bureau"], "team": "", "phone": "", "duty": "담당업무 미확인: 공식 조직도에서 확인한 조직입니다. 직원 업무표에서 지방소득세 담당 여부를 확인해 주세요.", "duty_verified": False, "url": entry["url"], "score": 1, "evidence": [evidence]})
+    combined = list(unique.values()) + website_organizations + [c for c in org_candidates if c["org_code"] not in matched]
     result["candidates"] = sorted(combined, key=lambda x: (not has_duty_evidence(x), -x["score"]))[:20]
     if len(combined) > 20:
         result["notes"].append("후보가 많아 상위 20개만 표시했습니다. 시·군·구 이름을 더 구체적으로 입력해 주세요.")
@@ -476,7 +615,7 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
         depts = {c["department"] for c in duties}
         result["status"] = "후보 발견" if duty_found else "담당업무 미확인"
         if not duty_found:
-            result["notes"].append("기관코드는 조직 정보만 제공합니다. 공식 업무안내 URL로 다시 조회하거나 네이버 검색 API를 연결해 지방소득세·세입 이체 업무를 확인해 주세요.")
+            result["notes"].append("조직 목록만으로는 담당업무를 확인할 수 없습니다. 공식 직원 업무표 URL로 다시 조회해 지방소득세·세입 이체 업무를 확인해 주세요.")
         if len(depts) > 1:
             result["notes"].append("관련 부서가 여러 개입니다. 개인·법인·세입 이체 업무를 비교해 수신처를 선택해 주세요.")
         if not any(c["bureau"] for c in duties or result["candidates"]):
@@ -486,4 +625,6 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
     else:
         result["notes"].append("지방소득세 담당 부서를 본문에서 확인하지 못했습니다. 검색 링크 또는 공식 URL로 보완해 주세요.")
     result["pages_checked"] = len(pages)
+    if len(visited) >= 12 and queue:
+        result["notes"].append("공식 홈페이지는 최대 12개 페이지까지 조회합니다. 누락된 업무는 직원 업무표 URL로 다시 조회해 주세요.")
     return result

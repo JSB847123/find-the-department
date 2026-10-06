@@ -13,11 +13,12 @@
     <div class="nav-label">작업 공간</div>
     <button class="nav active" id="nav-search"><span>⌕</span>부서 조회</button>
     <button class="nav" id="nav-saved"><span>▤</span>확인한 수신처 <b id="saved-count">0</b></button>
+    <button class="nav" id="websites-open"><span>↗</span>홈페이지 관리</button>
     <div class="sidebar-bottom">
       <div class="connection"><i id="connection-dot"></i><span id="connection-label">연결 확인 중</span></div>
       <button class="nav" id="settings-open"><span>⚙</span>API 설정</button>
       <p>이 컴퓨터에서 실행 중<br>조회 결과는 로컬에 저장됩니다.</p>
-      <span class="version">LOCAL WORKSPACE · V0.2</span>
+      <span class="version">LOCAL WORKSPACE · V0.3</span>
     </div>
   </aside>
 
@@ -49,14 +50,15 @@
         <div id="paste-pane" hidden>
           <label for="locations">시·도를 포함한 지자체 이름</label>
           <textarea id="locations" rows="9" placeholder="전남광주통합특별시 서구&#10;서울특별시 강남구&#10;경기도 수원시"></textarea>
-          <p class="help">한 줄에 한 지자체씩 입력하거나 엑셀에서 복사해 붙여넣으세요.</p>
+          <p class="help">한 줄에 한 지자체씩 입력하세요. 엑셀에서 ‘지자체 이름 + 공식 홈페이지 URL’ 두 열을 함께 붙여넣을 수도 있습니다.</p>
         </div>
         <div class="target-summary"><strong id="target-count">0</strong><span>개 지자체</span><small id="duplicate-note">최대 100개 / 중복 자동 제외</small></div>
         <div id="preview" class="preview"><span>파일을 올리면 조회 목록이 표시됩니다.</span></div>
         <label>찾을 업무<select id="kind"><option value="all">개인·법인 지방소득세 전반</option><option value="personal">개인 지방소득세</option><option value="corporate">법인 지방소득세</option><option value="special">특별징수분 지방소득세</option></select></label>
+        <label class="checkbox-label"><input type="checkbox" id="remember-websites"><span>입력한 홈페이지 URL을 다음 조회에도 사용</span></label>
         <button class="primary search-button" id="search-start" disabled><span>⌕</span>담당 부서 조회</button>
         <button class="quiet" id="sample">서구 예제로 시작</button>
-        <p class="input-footnote">공식 업무안내 URL이 있으면 API 없이도 조회할 수 있습니다. 서구 예제는 공식 조직도부터 조회합니다.</p>
+        <p class="input-footnote">등록된 홈페이지에서 조직도 → 부서 → 직원 업무표를 먼저 확인합니다. 공식 URL 조회에는 별도 API 키가 필요 없습니다.</p>
       </section>
 
       <section class="results-panel">
@@ -72,6 +74,23 @@
     </section>
     <p class="page-footnote">자동 조회는 부서 후보를 제시합니다. 홈페이지의 조직 개편과 실제 세입 이체 담당을 확인한 뒤 수신처로 저장하세요.</p>
   </main>
+
+  <dialog id="websites-dialog" class="detail-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">공식 홈페이지 우선 조회</div><h2>홈페이지 관리</h2></div><button class="close" id="websites-close" aria-label="닫기">×</button></div>
+    <p>지자체 홈페이지나 조직도 주소를 한 번 등록하면 다음 조회에도 사용합니다. 부서명은 조회할 때 현재 조직도와 직원 업무표에서 다시 확인합니다.</p>
+    <form id="website-form">
+      <label>지자체 이름<input id="website-location" required maxlength="100" placeholder="대전광역시 서구"></label>
+      <label>공식 홈페이지·조직도 URL<input id="website-url" type="url" required maxlength="2000" placeholder="https://..."></label>
+      <p class="help">조직도 URL을 권장합니다. 등록 후 조회 시 기관명이 일치하는지 확인합니다. 이미지 조직도나 일부 동적 페이지는 직접 확인이 필요할 수 있습니다.</p>
+      <div class="form-error" id="website-error" role="alert"></div>
+      <button class="primary" id="website-save">주소 저장</button>
+    </form>
+    <p class="help" id="website-count"></p>
+    <div class="two-fields"><label>시·도<select id="website-region"><option value="">전체 시·도</option></select></label><label>등록 목록 검색<input id="website-filter" placeholder="지자체 이름으로 검색"></label></div>
+    <a class="text-link" href="https://www.mois.go.kr/frt/sub/a04/localGovernment/screen.do" target="_blank" rel="noopener noreferrer">행정안전부 공식 지자체 누리집 목록 ↗</a>
+    <p class="help">기관명 확인은 홈페이지 첫 화면의 기관 표시를 읽은 결과입니다. 지방소득세 담당 부서는 조회 후 업무 근거에서 확인하세요.</p>
+    <div id="website-list" class="website-list"></div>
+  </dialog>
 
   <dialog id="settings-dialog">
     <form id="settings-form"><div class="dialog-heading"><div><div class="eyebrow">조직·검색 연결</div><h2>API 설정</h2></div><button type="button" class="close" id="settings-close" aria-label="닫기">×</button></div>
@@ -97,6 +116,7 @@
     <div class="dialog-heading"><div><div class="eyebrow">업무·조직 근거 확인</div><h2 id="detail-title"></h2></div><button class="close" id="detail-close" aria-label="닫기">×</button></div>
     <div id="detail-notes" class="detail-notes"></div>
     <p id="detail-time" class="help"></p>
+    <details id="website-trace" class="website-trace"><summary>홈페이지 조회 기록</summary><div id="website-checks"></div></details>
     <label>담당 업무 후보<select id="candidate-select"></select></label>
     <div id="duty-summary" class="duty-summary"></div>
     <div id="evidence" class="evidence"></div>

@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeUrl = value => /^https?:\/\//i.test(value || '') ? value : '';
 let workbook = null, mode = 'file', view = 'search', targets = [], sourceUrls = {}, results = [], saved = [], jobId = '', running = false, filter = 'all', selectedRow = null, candidateIndex = -1, polling = null;
-let toastTimer;
+let toastTimer, websites=[];
 function toast(text) { $('toast').textContent = text; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 4000); }
 function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
 async function api(path, body) {
@@ -32,7 +32,12 @@ function populateColumns() {
 }
 function updateTargets() {
   let raw=[]; sourceUrls={};
-  if (mode==='paste') raw=$('locations').value.split(/\r?\n/).map(x=>x.replace(/\t+/g,' ').trim()).filter(Boolean);
+  if (mode==='paste') {
+    for (const line of $('locations').value.split(/\r?\n/)) {
+      const parts=line.split('\t').map(x=>x.trim()), url=parts.find(x=>safeUrl(x)), value=parts.filter(x=>x&&!safeUrl(x)).join(' ').replace(/\s+/g,' ').trim();
+      if (value) { raw.push(value); if (url) sourceUrls[value]=url; }
+    }
+  }
   else if (workbook) {
     const location=Number($('location-column').value), province=Number($('province-column').value), url=Number($('url-column').value), start=Math.max(0,Number($('header-row').value));
     for (const row of sheetRows().slice(start)) {
@@ -45,7 +50,7 @@ function updateTargets() {
   targets=[...new Set(raw)];
   $('target-count').textContent=targets.length;
   $('duplicate-note').textContent=raw.length>targets.length ? `중복 ${raw.length-targets.length}개 제외` : '최대 100개 / 중복 자동 제외';
-  $('preview').innerHTML=targets.length ? targets.slice(0,5).map(x=>`<span>${escape(x)}</span>`).join('')+(targets.length>5 ? `<span class="more">외 ${targets.length-5}개 지자체</span>`:'') : '<span>조회할 지자체 목록이 표시됩니다.</span>';
+  $('preview').innerHTML=targets.length ? targets.slice(0,5).map(x=>`<span>${escape(x)}${sourceUrls[x]?' · 공식 URL':''}</span>`).join('')+(targets.length>5 ? `<span class="more">외 ${targets.length-5}개 지자체</span>`:'') : '<span>조회할 지자체 목록이 표시됩니다.</span>';
   $('search-start').disabled=running || !targets.length || targets.length>100;
   if (targets.length>100) notice('한 번에 최대 100개까지 조회할 수 있습니다. 목록을 나눠 주세요.');
 }
@@ -113,6 +118,9 @@ function render() {
 async function begin(locations=targets,sources=sourceUrls) {
   if (running) { toast('진행 중인 조회가 끝난 뒤 다시 시작해 주세요.'); return; }
   try {
+    if ($('remember-websites').checked) {
+      for (const [location,url] of Object.entries(sources)) await api('/api/websites',{location,url});
+    }
     const job=await api('/api/search',{locations,kind:$('kind').value,sources}); jobId=job.id; results=[]; running=true; $('cancel').textContent='조회 중지';
     $('progress-area').hidden=false; $('cancel').disabled=false; setView('search'); updateTargets(); notice('공식 자료에서 후보를 찾고 있습니다. 결과가 나오면 각 행을 선택해 근거를 확인하세요.');
     await poll();
@@ -136,6 +144,10 @@ async function poll() {
 function openDetail(row) {
   selectedRow=row; $('detail-title').textContent=row.location; $('detail-notes').textContent=(row.notes||[]).join(' ');
   $('detail-time').textContent=`조회: ${row.checked_at || '시각 미기록'}${row.confirmed_at ? ' · 확인: '+row.confirmed_at : ''}`;
+  const checks=row.website_checks||[];
+  $('website-trace').hidden=!checks.length;
+  $('website-trace').querySelector('summary').textContent=`홈페이지 조회 기록 · ${checks.filter(c=>c.status==='확인').length}개 페이지 확인`;
+  $('website-checks').innerHTML=checks.map(c=>`<article><b>${escape(c.status)}${c.roles?.length?' · '+escape(c.roles.join(' / ')):''}</b><a class="text-link" href="${escape(safeUrl(c.url))}" target="_blank" rel="noopener noreferrer">${escape(c.title||c.url)} ↗</a>${c.departments?.length?`<p>${escape(c.departments.join(' · '))}</p>`:''}${c.message?`<p>${escape(c.message)}</p>`:''}</article>`).join('');
   const candidates=row.candidates||[];
   const recommended=recommendedCandidate(row);
   candidateIndex=recommended?candidates.indexOf(recommended):-1;
@@ -147,7 +159,7 @@ function openDetail(row) {
   }
   loadCandidate(recommended);
   $('manual-search').href=safeUrl(row.search_url) || 'https://search.naver.com/search.naver?query='+encodeURIComponent(row.location+' 지방소득세 담당');
-  $('retry-url').value=''; $('verified').checked=false; $('confirm-error').textContent=''; $('detail-dialog').showModal();
+  $('retry-url').value=row.website_source||''; $('verified').checked=false; $('confirm-error').textContent=''; $('detail-dialog').showModal();
 }
 function loadCandidate(c={}) {
   c=c||{}; $('duty-summary').textContent=c.duty || '지방소득세 담당업무를 확인하지 못했습니다. 기관코드의 조직 목록만으로 수신처를 선택하지 마세요. 공식 업무안내 URL로 다시 조회할 수 있습니다.';
@@ -162,9 +174,28 @@ async function refreshSaved() { saved=(await api('/api/saved')).results; $('save
 async function settingsStatus() {
   const data=await api('/api/settings'); $('connection-dot').classList.toggle('ready',data.naver_configured||data.public_configured);
   $('connection-label').textContent=data.public_configured?(data.naver_configured?'조직·검색 API 설정됨':'기관코드 API 설정됨'):(data.naver_configured?'검색 API 설정됨':'API 미설정');
-  if (data.public_configured&&!data.naver_configured) notice('기관코드로 세무 관련 조직을 조회합니다. 담당업무는 공식 URL로 확인할 수 있으며, 네이버 검색 API를 추가하면 업무안내를 자동 검색합니다.');
-  else if (!data.naver_configured) notice('API 설정에서 기관코드 인증키를 연결하세요. 서구 예제와 공식 URL 조회는 바로 사용할 수 있습니다.');
+  if (!data.naver_configured) notice('등록된 공식 홈페이지를 먼저 조회합니다. 홈페이지 관리에서 주소를 추가하거나 엑셀의 URL 열을 선택하세요. 기관코드 API는 조직 정보를 보완합니다.');
 }
+function renderWebsites() {
+  const previous=$('website-region').value, regions=[...new Set(websites.map(w=>w.region||w.location.split(' ')[0]))].sort();
+  $('website-region').innerHTML='<option value="">전체 시·도</option>'+regions.map(r=>`<option value="${escape(r)}">${escape(r)}</option>`).join('');
+  if(regions.includes(previous)) $('website-region').value=previous;
+  const region=$('website-region').value, query=$('website-filter').value.replace(/\s+/g,'').toLowerCase();
+  const visible=websites.map((w,i)=>({w,i})).filter(({w})=>(!region||(w.region||w.location.split(' ')[0])===region)&&(!query||(w.location+w.url).replace(/\s+/g,'').toLowerCase().includes(query)));
+  const builtin=websites.filter(w=>w.builtin).length;
+  $('website-count').textContent=`총 ${websites.length}개 · 기본 등록 ${builtin}개 · 직접 등록 ${websites.length-builtin}개 · 현재 ${visible.length}개 표시`;
+  $('website-list').innerHTML=visible.map(({w,i})=>`<article><div><strong>${escape(w.location)}</strong><small>${w.builtin?escape((w.url_kind||'홈페이지')+' 기본 등록'):'직접 등록'}${w.level?' · '+escape(w.level):''}${w.homepage_status?' · '+escape(w.homepage_status):''}</small><a class="text-link" href="${escape(safeUrl(w.url))}" target="_blank" rel="noopener noreferrer">공식 홈페이지 열기 ↗</a>${w.source_url?` · <a class="text-link" href="${escape(safeUrl(w.source_url))}" target="_blank" rel="noopener noreferrer">등록 출처 ↗</a>`:''}</div><div><button class="secondary" data-edit="${i}">수정</button>${w.builtin?'':`<button class="quiet" data-remove="${i}">등록 해제</button>`}</div></article>`).join('')||'<p>검색 조건에 맞는 등록 주소가 없습니다.</p>';
+  for (const button of $('website-list').querySelectorAll('[data-edit]')) button.onclick=()=>{const w=websites[Number(button.dataset.edit)];$('website-location').value=w.location;$('website-url').value=w.url;$('website-location').focus();};
+  for (const button of $('website-list').querySelectorAll('[data-remove]')) button.onclick=async()=>{try{websites=(await api('/api/websites/remove',{location:websites[Number(button.dataset.remove)].location})).websites;renderWebsites();toast('등록을 해제했습니다. 기본 등록 주소는 다시 표시됩니다.');}catch(e){$('website-error').textContent=e.message;}};
+}
+$('website-region').onchange=renderWebsites;$('website-filter').oninput=renderWebsites;
+$('websites-open').onclick=async()=>{try{websites=(await api('/api/websites')).websites;renderWebsites();$('website-error').textContent='';$('websites-dialog').showModal();}catch(e){toast(e.message);}};
+$('websites-close').onclick=()=>$('websites-dialog').close();
+$('website-form').onsubmit=async e=>{
+  e.preventDefault();$('website-save').disabled=true;$('website-error').textContent='';
+  try{websites=(await api('/api/websites',{location:$('website-location').value,url:$('website-url').value})).websites;renderWebsites();$('website-form').reset();toast('주소를 저장했습니다. 다음 조회에 자동으로 사용합니다.');}
+  catch(err){$('website-error').textContent=err.message;}finally{$('website-save').disabled=false;}
+};
 function settingsProvider() {
   const isPublic=$('settings-provider').value==='public';
   $('public-settings').hidden=!isPublic; $('naver-settings').hidden=isPublic;

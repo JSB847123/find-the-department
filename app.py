@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from finder import find_department, stamp, location_key, recommended_candidate
+from finder import find_department, stamp, location_key, recommended_candidate, HINTS, official_host
 from workbook import read_workbook
 
 ROOT = Path(__file__).resolve().parent
@@ -77,9 +77,44 @@ def saved_results():
         return []
 
 
+def website_sources():
+    entries = {location_key(h["name"]): {"location": h["name"], "url": h["org"], "builtin": True, "region": h.get("region", h["name"].split()[0]), "level": h.get("level", "시군구"), "source_url": h.get("source_url", ""), "homepage_status": h.get("homepage_status", ""), "checked_at": h.get("checked_at", ""), "url_kind": "조직도" if h["org"] != h["url"] else "홈페이지"} for h in HINTS}
+    path = DATA / "websites.json"
+    if path.exists():
+        for entry in json.loads(path.read_text(encoding="utf-8")):
+            entries[location_key(entry["location"])] = entry
+    return list(entries.values())
+
+
+def website_location(location):
+    key = location_key(location)
+    hint = next((h for h in HINTS if key in [location_key(n) for n in [h["name"], *h["aliases"]]]), None)
+    return hint["name"] if hint else location
+
+
+def save_website(location, url):
+    location = re.sub(r"\s+", " ", str(location)).strip()
+    url = str(url).strip()
+    if not location or len(location) > 100 or location_key(location) in ("서구", "중구", "동구", "남구", "북구", "강서구", "고성군", "광주시"):
+        raise ValueError("시·도를 포함한 지자체 이름을 입력해 주세요.")
+    parsed = urllib.parse.urlsplit(url)
+    if len(url) > 2000 or parsed.scheme not in ("http", "https") or not official_host(parsed.hostname) or parsed.username or parsed.password or parsed.port not in (None, 80, 443):
+        raise ValueError("공식 지자체 홈페이지의 http:// 또는 https:// 주소를 입력해 주세요.")
+    location = website_location(location)
+    entry = {"location": location, "url": urllib.parse.urldefrag(url)[0], "builtin": False, "updated_at": stamp()}
+    with LOCK:
+        entries = [e for e in website_sources() if not e.get("builtin") and location_key(e["location"]) != location_key(location)]
+        if len(entries) >= 500:
+            raise ValueError("최대 500개 지자체의 홈페이지를 등록할 수 있습니다.")
+        save_json(DATA / "websites.json", [*entries, entry])
+    return entry
+
+
 def run_job(job_id, locations, kind, sources):
     creds = credentials()
     org_key = public_key()
+    with LOCK:
+        registered = {location_key(e["location"]): e["url"] for e in website_sources()}
     for index, location in enumerate(locations):
         with LOCK:
             if JOBS[job_id]["cancelled"]:
@@ -87,7 +122,8 @@ def run_job(job_id, locations, kind, sources):
             JOBS[job_id]["current"] = location
             JOBS[job_id]["state"] = "running"
         try:
-            row = find_department(location, creds, kind, sources.get(location, ""), public_key=org_key)
+            source = sources.get(location, "") or registered.get(location_key(website_location(location)), "")
+            row = find_department(location, creds, kind, source, public_key=org_key)
         except Exception:
             row = {"location": location, "canonical": location, "status": "검토 필요", "candidates": [], "notes": ["조회 중 오류가 발생했습니다. 공식 홈페이지 링크로 다시 확인해 주세요."], "checked_at": stamp(), "confirmed": False}
         row["id"] = secrets.token_hex(8)
@@ -104,20 +140,22 @@ def run_job(job_id, locations, kind, sources):
 def csv_bytes(rows):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream)
-    writer.writerow(["입력 지자체", "확인 기관명", "상위 국", "담당 부서", "팀", "전화번호", "담당업무", "공문 수신처", "상태", "업무 근거 URL", "조직도 URL", "조회 시각", "사용자 확인 시각", "검토 메모", "기관코드", "기관코드 전체명", "기관코드 자료 URL", "조직 후보 목록(담당업무 미확인)"])
+    writer.writerow(["입력 지자체", "확인 기관명", "상위 국", "담당 부서", "팀", "전화번호", "담당업무", "공문 수신처", "상태", "업무 근거 URL", "조직도 URL", "조회 시각", "사용자 확인 시각", "검토 메모", "기관코드", "기관코드 전체명", "기관코드 자료 URL", "조직 후보 목록(담당업무 미확인)", "홈페이지 시작 URL", "홈페이지 확인 페이지 수", "홈페이지 조회 기록"])
     for row in rows:
         # Unconfirmed rows remain visible in export but never receive an
         # apparently final recipient assembled from an automatic suggestion.
         candidate = recommended_candidate(row)
         organizations = [c for c in row.get("candidates", []) if c.get("duty_verified") is False]
         evidence = candidate.get("evidence", [])
-        org_url = next((e["url"] for e in evidence if e["type"] == "조직도"), "")
         api_evidence = evidence or [e for c in organizations for e in c.get("evidence", [])]
+        org_url = next((e["url"] for e in api_evidence if e["type"] == "조직도"), "")
         api_url = next((e["url"] for e in api_evidence if e["type"] == "기관코드 API"), "")
         duty_url = candidate.get("url", "") if candidate.get("duty_verified") is not False else ""
         status = "사용자 확인" if row.get("confirmed") else "담당업무 미확인" if organizations and not candidate else row["status"]
         organization_list = " / ".join(c.get("org_full_name", c.get("department", "")) + (f" [{c['org_code']}]" if c.get("org_code") else "") for c in organizations)
-        values = [row["location"], row.get("canonical", ""), candidate.get("bureau", ""), candidate.get("department", ""), candidate.get("team", ""), candidate.get("phone", ""), candidate.get("duty", ""), row.get("recipient", "") if row.get("confirmed") else "", status, duty_url, org_url, row.get("checked_at", ""), row.get("confirmed_at", ""), " / ".join(row.get("notes", [])), candidate.get("org_code", ""), candidate.get("org_full_name", ""), api_url, organization_list]
+        checks = row.get("website_checks", [])
+        trace = " / ".join(f"{c['status']} {','.join(c.get('roles', []))}: {c['url']}" for c in checks)
+        values = [row["location"], row.get("canonical", ""), candidate.get("bureau", ""), candidate.get("department", ""), candidate.get("team", ""), candidate.get("phone", ""), candidate.get("duty", ""), row.get("recipient", "") if row.get("confirmed") else "", status, duty_url, org_url, row.get("checked_at", ""), row.get("confirmed_at", ""), " / ".join(row.get("notes", [])), candidate.get("org_code", ""), candidate.get("org_full_name", ""), api_url, organization_list, row.get("website_source", ""), row.get("pages_checked", ""), trace]
         # Prevent spreadsheet formula execution when a filename, website or
         # user-entered recipient begins with a spreadsheet control character.
         writer.writerow(["'" + str(v) if str(v).startswith(("=", "+", "-", "@", "\t", "\r", "\n")) else str(v) for v in values])
@@ -169,9 +207,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         with LOCK:
             if path == "/api/settings":
-                self.respond({"naver_configured": all(credentials()), "public_configured": bool(public_key()), "version": "0.2"})
+                self.respond({"naver_configured": all(credentials()), "public_configured": bool(public_key()), "version": "0.3"})
             elif path == "/api/saved":
                 self.respond({"results": saved_results()})
+            elif path == "/api/websites":
+                self.respond({"websites": website_sources()})
             elif path == "/api/last":
                 try:
                     self.respond(json.loads((DATA / "last-session.json").read_text(encoding="utf-8")))
@@ -239,6 +279,15 @@ class Handler(BaseHTTPRequestHandler):
                 if len(raw) > 10_000_000:
                     raise ValueError("파일은 10MB 이하로 준비해 주세요.")
                 self.respond(read_workbook(raw, str(payload.get("filename", ""))))
+            elif path == "/api/websites":
+                entry = save_website(payload.get("location", ""), payload.get("url", ""))
+                self.respond({"website": entry, "websites": website_sources()})
+            elif path == "/api/websites/remove":
+                key = location_key(website_location(str(payload.get("location", ""))))
+                with LOCK:
+                    entries = [e for e in website_sources() if not e.get("builtin") and location_key(e["location"]) != key]
+                    save_json(DATA / "websites.json", entries)
+                    self.respond({"websites": website_sources()})
             elif path == "/api/search":
                 if not isinstance(payload.get("locations"), list):
                     raise ValueError("지자체 목록을 확인해 주세요.")
