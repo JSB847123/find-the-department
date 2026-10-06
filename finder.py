@@ -27,7 +27,10 @@ PROVINCES = ["seoul", "busan", "daegu", "incheon", "gwangju", "daejeon", "ulsan"
 REGION_WORDS = {"서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구", "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전", "울산광역시": "울산", "경기도": "경기", "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북", "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북", "전라남도": "전남", "경상북도": "경북", "경상남도": "경남", "제주특별자치도": "제주", "세종특별자치시": "세종"}
 # Homepage discovery hints, not department answers. Both names must still be
 # checked against current page identity; aliases are not nationwide rewrites.
-HINTS = [{"name": "전남광주통합특별시 서구", "aliases": ["광주광역시 서구", "광주 서구", "광주서구"], "url": "https://www.seogu.gwangju.kr/", "org": "https://www.seogu.gwangju.kr/menu.es?mid=a10106030000"}]
+HINTS = [
+    {"name": "전남광주통합특별시 서구", "aliases": ["광주광역시 서구", "광주 서구", "광주서구"], "url": "https://www.seogu.gwangju.kr/", "org": "https://www.seogu.gwangju.kr/menu.es?mid=a10106030000"},
+    {"name": "인천광역시 부평구", "aliases": ["인천 부평구", "인천 부평", "인천광역시 부평"], "url": "https://www.icbp.go.kr/", "org": "https://www.icbp.go.kr/main/introduction/guidance/organization.jsp"},
+]
 
 
 def stamp():
@@ -184,8 +187,56 @@ def hierarchy(page, url):
 
 
 def content_root(page):
-    options = [n for n in page.root.walk() if n.attrs.get("id", "").lower() in ("contents", "content", "sub_content", "subcontent", "content_area", "contents_body") or n.tag == "main"]
+    options = [n for n in page.root.walk() if n.attrs.get("id", "").lower() in ("contents", "content", "sub_content", "subcontent", "content_area", "contents_body", "detail_con") or n.tag == "main"]
     return options[0] if options else page.root
+
+
+def department_team_heading(text):
+    match = re.fullmatch(rf"({DEPT.pattern})[>›→/]([가-힣]{{2,12}}팀)", compact(text))
+    return match.groups() if match else ("", "")
+
+
+def table_context(node):
+    table = node
+    while table and table.tag != "table":
+        table = table.parent
+    scope = table
+    for _ in range(4):
+        if not scope or not scope.parent:
+            break
+        siblings = scope.parent.children
+        index = next(i for i, sibling in enumerate(siblings) if sibling is scope)
+        for sibling in reversed(siblings[:index]):
+            if not isinstance(sibling, Node):
+                continue
+            # Never borrow the heading of a previous employee table.
+            if next(sibling.walk("table"), None):
+                return "", ""
+            text = sibling.text()
+            if len(text) > 100:
+                continue
+            dept, team = department_team_heading(text)
+            if dept:
+                return dept, team
+            if sibling.tag in ("h2", "h3", "h4", "h5", "h6") and re.fullmatch(r"[가-힣]{2,12}팀", compact(text)):
+                return "", compact(text)
+        scope = scope.parent
+    return "", ""
+
+
+def has_duty_evidence(candidate):
+    # Also recognize older saved results that predate duty_verified. The
+    # organization API's boilerplate contains 지방소득세 but proves no duty.
+    return candidate.get("duty_verified") is not False and any(
+        e.get("type") == "업무안내" and TAX.search(e.get("text", "") or candidate.get("duty", ""))
+        for e in candidate.get("evidence", [])
+    )
+
+
+def recommended_candidate(row):
+    if row.get("confirmed") and row.get("selected"):
+        return row["selected"]
+    return next((c for c in row.get("candidates", []) if has_duty_evidence(c)), {})
 
 
 def extract_candidates(page, url, department_hint="", bureau_hint="", kind="all"):
@@ -208,6 +259,8 @@ def extract_candidates(page, url, department_hint="", bureau_hint="", kind="all"
         text = re.sub(r"\s+", " ", node.text())
         if not TAX.search(text) or len(text) > 1700:
             continue
+        if department_team_heading(text)[0] or re.fullmatch(r"[가-힣]{2,12}팀", compact(text)):
+            continue  # A team heading is not an employee's duty description.
         parent = node.parent
         in_nav = False
         while parent:
@@ -219,32 +272,35 @@ def extract_candidates(page, url, department_hint="", bureau_hint="", kind="all"
         depts = list(dict.fromkeys(DEPT.findall(text)))
         if len(depts) > 1:
             continue
-        dept = depts[0] if depts else context
+        local_dept, local_team = table_context(node)
+        if depts and local_dept and depts[0] != local_dept:
+            continue
+        dept = depts[0] if depts else local_dept or context
         if not dept:
             continue
         phones = PHONE.findall(text)
-        teams = re.findall(r"[가-힣]{2,12}팀", text)
+        teams = [local_team] if local_team else re.findall(r"[가-힣]{2,12}팀", text)
         if not teams:
             scope = node.parent
             for _ in range(5):
                 if not scope:
                     break
                 headings = [h.text() for h in scope.walk("h3")]
-                if len(headings) == 1:
+                if len(headings) == 1 and sum(1 for _ in scope.walk("table")) <= 1:
                     teams = re.findall(r"[가-힣]{2,12}팀", headings[0])
                     break
                 scope = scope.parent
         cells = [c for c in node.children if isinstance(c, Node) and c.tag == "td"]
         duty = cells[-1].text() if len(cells) >= 3 else text
         score = 3 + (3 if node.tag == "tr" else 0) + (2 if phones else 0)
-        if re.search(r"지방소득세\s*(?:업무\s*)?(?:전반|총괄)", text):
+        if re.search(r"지방소득세(?:팀)?\s*(?:업무\s*)?(?:전반|총괄)", text):
             score += 4
         if any(w in text for w in ("세입이체", "세입 이체", "타시군", "타 시군", "자치단체간", "자치단체 간")):
             score += 6
         if kind != "all" and {"personal": "개인", "corporate": "법인", "special": "특별징수"}[kind] in text:
             score += 3
         # Show personal/corporate rows independently when departments differ.
-        candidates.append({"department": dept, "bureau": bureau_hint, "team": teams[0] if teams else "", "phone": phones[0] if phones else "", "duty": duty, "url": url, "score": score, "evidence": [{"type": "업무안내", "url": url, "text": text[:900]}]})
+        candidates.append({"department": dept, "bureau": bureau_hint, "team": teams[0] if teams else "", "phone": phones[0] if phones else "", "duty": duty, "duty_verified": True, "url": url, "score": score, "evidence": [{"type": "업무안내", "url": url, "text": text[:900]}]})
     return candidates
 
 
@@ -282,7 +338,7 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
     if hint:
         result["canonical"] = hint["name"]
         if location_key(location) != location_key(hint["name"]):
-            result["notes"].append("구 명칭으로 검색했습니다. 현재 공식 홈페이지의 기관명과 함께 확인해 주세요.")
+            result["notes"].append("입력한 약칭·별칭을 공식 기관명과 대조했습니다. 수신처에는 공식 기관명을 확인해 사용해 주세요.")
     queries = [f'{location} 지방소득세 담당 직원 업무', f'{location} 세무과 조직도']
     result["search_url"] = "https://search.naver.com/search.naver?" + urllib.parse.urlencode({"query": queries[0]})
     queue = collections.deque()
@@ -356,6 +412,8 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
                     follow.append((link, "", "", True))
             # Organization and tax detail pages first; avoid crawling every
             # personnel page or unrelated content on a municipal portal.
+            follow = list({entry[0]: entry for entry in follow}.values())
+            follow.sort(key=lambda entry: 0 if re.search(r"orgno1=|organizationView", entry[0]) else 1)
             for entry in follow[:6]:
                 queue.append(entry)
         except Exception as exc:
@@ -409,18 +467,19 @@ def find_department(location, credentials=("", ""), kind="all", source_url="", p
         elif not candidate["bureau"] and not any(e["type"] == "조직 상충" for e in candidate["evidence"]):
             candidate["bureau"] = org["bureau"]
     combined = list(unique.values()) + [c for c in org_candidates if c["org_code"] not in matched]
-    result["candidates"] = sorted(combined, key=lambda x: -x["score"])[:20]
+    result["candidates"] = sorted(combined, key=lambda x: (not has_duty_evidence(x), -x["score"]))[:20]
     if len(combined) > 20:
         result["notes"].append("후보가 많아 상위 20개만 표시했습니다. 시·군·구 이름을 더 구체적으로 입력해 주세요.")
     if result["candidates"]:
-        depts = {c["department"] for c in result["candidates"]}
-        duty_found = any(c.get("duty_verified") for c in result["candidates"])
-        result["status"] = "후보 발견" if duty_found else "조직 후보"
+        duties = [c for c in result["candidates"] if has_duty_evidence(c)]
+        duty_found = bool(duties)
+        depts = {c["department"] for c in duties}
+        result["status"] = "후보 발견" if duty_found else "담당업무 미확인"
         if not duty_found:
             result["notes"].append("기관코드는 조직 정보만 제공합니다. 공식 업무안내 URL로 다시 조회하거나 네이버 검색 API를 연결해 지방소득세·세입 이체 업무를 확인해 주세요.")
         if len(depts) > 1:
             result["notes"].append("관련 부서가 여러 개입니다. 개인·법인·세입 이체 업무를 비교해 수신처를 선택해 주세요.")
-        if not any(c["bureau"] for c in result["candidates"]):
+        if not any(c["bureau"] for c in duties or result["candidates"]):
             result["notes"].append("상위 국은 근거를 찾지 못해 비워 두었습니다. 조직도를 확인해 주세요.")
         if duty_found and not any(c.get("duty_verified") and "이체" in c["duty"] for c in result["candidates"]):
             result["notes"].append("지방소득세 업무는 찾았지만 세입 이체 담당인지는 추가 확인이 필요합니다.")

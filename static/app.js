@@ -80,9 +80,15 @@ function visibleResults() {
     return !query || JSON.stringify([row.location,row.canonical,row.candidates,row.selected]).toLowerCase().includes(query);
   });
 }
+function hasDutyEvidence(c) {
+  return c.duty_verified!==false && (c.evidence||[]).some(e=>e.type==='업무안내'&&/지방\s*소득세/.test(e.text||c.duty||''));
+}
+function recommendedCandidate(row) {
+  return row.confirmed&&row.selected ? row.selected : (row.candidates||[]).find(hasDutyEvidence);
+}
 function render() {
   const all=view==='saved'?saved:results, rows=visibleResults();
-  $('result-total').textContent=all.length; $('result-found').textContent=all.filter(r=>r.candidates?.length&&!r.confirmed).length;
+  $('result-total').textContent=all.length; $('result-found').textContent=all.filter(r=>recommendedCandidate(r)&&!r.confirmed).length;
   $('result-review').textContent=all.filter(r=>!r.confirmed).length; $('result-confirmed').textContent=all.filter(r=>r.confirmed).length;
   $('saved-count').textContent=saved.length; $('export').disabled=!all.length; $('copy-recipients').disabled=!rows.some(r=>r.confirmed);
   $('empty').hidden=rows.length>0;
@@ -91,9 +97,13 @@ function render() {
     $('empty').querySelector('p').textContent=view==='saved' ? '조회 결과에서 근거를 확인하고 수신처를 저장하세요.' : '엑셀의 지자체 목록에서 공문을 보낼 담당 부서를 찾습니다.';
   }
   $('result-rows').innerHTML=rows.map(row=>{
-    const c=row.selected || row.candidates?.[0] || {}, css=row.confirmed?'confirmed':row.candidates?.length?'found':'review';
+    const candidate=recommendedCandidate(row), c=candidate||{}, organizations=(row.candidates||[]).filter(c=>c.duty_verified===false);
+    const css=row.confirmed?'confirmed':candidate?'found':'review';
     const evidence=c.evidence || [];
-    return `<tr class="result-row" tabindex="0" data-id="${escape(row.id)}"><td><strong>${escape(row.location)}</strong>${row.canonical!==row.location?`<small>현재 명칭: ${escape(row.canonical)}</small>`:''}</td><td><strong>${escape(c.department || '확인 필요')}</strong><small>${escape(c.bureau || '상위 국 미확인')}${c.team?' · '+escape(c.team):''}</small></td><td><span class="status ${css}">${escape(row.confirmed?'사용자 확인':row.status)}</span></td><td><span class="proof-count">${evidence.length?evidence.length+'개 ↗':'확인 →'}</span></td></tr>`;
+    const organizationNames=[...new Set(organizations.map(c=>c.department))].join(' · ');
+    const subtitle=candidate ? (c.bureau||'상위 국 미확인')+(c.team?' · '+c.team:'') : organizationNames ? '조직 후보: '+organizationNames : '업무안내 확인 필요';
+    const status=row.confirmed?'사용자 확인':!candidate&&organizations.length?'담당업무 미확인':row.status;
+    return `<tr class="result-row" tabindex="0" data-id="${escape(row.id)}"><td><strong>${escape(row.location)}</strong>${row.canonical!==row.location?`<small>현재 명칭: ${escape(row.canonical)}</small>`:''}</td><td><strong>${escape(c.department || '담당 부서 미확인')}</strong><small>${escape(subtitle)}</small></td><td><span class="status ${css}">${escape(status)}</span></td><td><span class="proof-count">${evidence.length?evidence.length+'개 ↗':organizations.length?'조직 '+organizations.length+'개 →':'확인 →'}</span></td></tr>`;
   }).join('');
   $('footer-status').textContent=all.length ? `${all.length}개 결과 · 확인 완료 ${all.filter(r=>r.confirmed).length}개` : '조회 전';
   for (const tr of $('result-rows').querySelectorAll('tr')) {
@@ -127,19 +137,22 @@ function openDetail(row) {
   selectedRow=row; $('detail-title').textContent=row.location; $('detail-notes').textContent=(row.notes||[]).join(' ');
   $('detail-time').textContent=`조회: ${row.checked_at || '시각 미기록'}${row.confirmed_at ? ' · 확인: '+row.confirmed_at : ''}`;
   const candidates=row.candidates||[];
-  $('candidate-select').innerHTML=candidates.length ? candidates.map((c,i)=>`<option value="${i}">${escape(c.department)} · ${escape(c.team || '담당 업무')} · ${escape(c.phone || '연락처 미확인')} — ${escape(c.duty).slice(0,100)}</option>`).join('') : '<option value="-1">후보 없음 · 직접 확인 후 입력</option>';
-  candidateIndex=candidates.length?0:-1;
+  const recommended=recommendedCandidate(row);
+  candidateIndex=recommended?candidates.indexOf(recommended):-1;
+  $('candidate-select').innerHTML=(candidateIndex>=0?'':'<option value="-1">직접 확인한 수신처 또는 담당업무 미확인</option>')+candidates.map((c,i)=>`<option value="${i}">${hasDutyEvidence(c)?'업무 근거 있음':'조직 정보만 있음'} · ${escape(c.department)} · ${escape(c.team || '팀 미확인')} · ${escape(c.phone || '연락처 미확인')} — ${escape(c.duty).slice(0,100)}</option>`).join('');
+  $('candidate-select').value=String(candidateIndex);
   if (row.confirmed && row.selected) {
     const i=candidates.findIndex(c=>c.phone===row.selected.phone&&c.department===row.selected.department);
     if (i>=0) { candidateIndex=i; $('candidate-select').value=i; }
   }
-  loadCandidate(row.confirmed ? row.selected : candidates[0]);
+  loadCandidate(recommended);
   $('manual-search').href=safeUrl(row.search_url) || 'https://search.naver.com/search.naver?query='+encodeURIComponent(row.location+' 지방소득세 담당');
   $('retry-url').value=''; $('verified').checked=false; $('confirm-error').textContent=''; $('detail-dialog').showModal();
 }
 function loadCandidate(c={}) {
-  c=c||{}; $('duty-summary').textContent=c.duty || '자동 조회에서 담당 부서를 확인하지 못했습니다. 공식 홈페이지를 확인하거나 URL로 다시 조회하세요.';
-  $('evidence').innerHTML=(c.evidence || []).map(e=>`<article><b>${escape(e.type)}</b><p>${escape(e.text)}</p><a class="text-link" href="${escape(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">공식 근거 열기 ↗</a></article>`).join('') || '<p>확인한 공식 페이지의 URL을 아래에 입력해 주세요.</p>';
+  c=c||{}; $('duty-summary').textContent=c.duty || '지방소득세 담당업무를 확인하지 못했습니다. 기관코드의 조직 목록만으로 수신처를 선택하지 마세요. 공식 업무안내 URL로 다시 조회할 수 있습니다.';
+  const evidence=c.evidence||(selectedRow.candidates||[]).filter(c=>c.duty_verified===false).flatMap(c=>c.evidence||[]);
+  $('evidence').innerHTML=evidence.map(e=>`<article><b>${escape(e.type)}</b><p>${escape(e.text)}</p><a class="text-link" href="${escape(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">공식 근거 열기 ↗</a></article>`).join('') || '<p>확인한 공식 페이지의 URL을 아래에 입력해 주세요.</p>';
   $('canonical').value=selectedRow.canonical;
   for (const id of ['bureau','department','team','phone']) $(id).value=c[id] || '';
   $('source-url').value=c.url || ''; $('verified').checked=false; recipientPreview();

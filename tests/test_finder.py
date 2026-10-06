@@ -60,6 +60,26 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 finder.validate_url('https://city.go.kr/')
 
+    def test_wrapped_staff_tables_keep_department_and_team_context(self):
+        page = finder.Page('<title>시청 직원안내</title><main><div class="para_line"><p>세무1과 &gt; 법인지방소득세팀</p></div><div class="para_line"><div class="tableBox"><table><tr><td>주무관</td><td>031-123-1001</td><td>법인지방소득세 부과</td></tr></table></div></div><div class="para_line"><p>세무2과 &gt; 개인지방소득세팀</p></div><div class="para_line"><div class="tableBox"><table><tr><td>주무관</td><td>031-123-1002</td><td>개인지방소득세 부과</td></tr></table></div></div></main>')
+        rows = finder.extract_candidates(page, 'https://city.go.kr/staff')
+        self.assertEqual(len(rows), 2)
+        self.assertEqual((rows[0]['department'], rows[0]['team'], rows[0]['phone']), ('세무1과', '법인지방소득세팀', '031-123-1001'))
+        self.assertEqual((rows[1]['department'], rows[1]['team'], rows[1]['phone']), ('세무2과', '개인지방소득세팀', '031-123-1002'))
+
+    def test_team_heading_is_not_duty_and_does_not_cross_another_table(self):
+        page = finder.Page('<title>시청 세무과</title><main><h3>지방소득세팀</h3><table><tr><td>팀장</td><td>031-123-1001</td><td>지방소득세팀 업무총괄</td></tr></table><table><tr><td>주무관</td><td>031-123-1002</td><td>지방소득세 자료 관리</td></tr></table></main>')
+        rows = finder.extract_candidates(page, 'https://city.go.kr/staff')
+        self.assertEqual(rows[0]['team'], '지방소득세팀')
+        self.assertEqual(rows[1]['team'], '')
+        self.assertGreater(rows[0]['score'], rows[1]['score'])
+
+    def test_legacy_duty_evidence_and_explicit_confirmation_remain_supported(self):
+        legacy = {'department': '세무과', 'duty': '지방소득세 부과', 'evidence': [{'type':'업무안내','text':'지방소득세 부과'}]}
+        organization = {'department':'재무과', 'duty_verified':False, 'duty':'지방소득세 담당업무 미확인', 'evidence':[{'type':'기관코드 API','text':'재무과'}]}
+        self.assertIs(finder.recommended_candidate({'candidates':[organization, legacy]}), legacy)
+        self.assertIs(finder.recommended_candidate({'candidates':[organization], 'confirmed':True, 'selected':organization}), organization)
+
 
 class WorkbookTests(unittest.TestCase):
     def make_book(self):

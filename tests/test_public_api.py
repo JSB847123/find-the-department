@@ -69,6 +69,14 @@ class PublicApiTests(unittest.TestCase):
             candidates, _ = OrgClient('sample').candidates('서울 중구')
         self.assertEqual(candidates[0]['bureau'], '')
 
+    def test_bureau_is_sufficient_when_municipal_root_is_omitted(self):
+        rows = [organization('1000001', '서울특별시 중구 행정국', '행정국', '1000000'), organization('1000002', '서울특별시 중구 행정국 세무과', '세무과', '1000001')]
+        with patch('finder.request', return_value=(response(rows), 'ignored')) as network:
+            candidates, notes = OrgClient('sample').candidates('서울 중구')
+        self.assertEqual(network.call_count, 1)
+        self.assertEqual(candidates[0]['bureau'], '행정국')
+        self.assertEqual(notes, [])
+
     def test_parent_lookup_cycle_terminates(self):
         row = organization('1000002', '서울특별시 중구 세무과', '세무과', '1000001')
         parent = organization('1000001', '서울특별시 중구 행정국', '행정국', '1000002')
@@ -93,7 +101,8 @@ class PublicApiTests(unittest.TestCase):
         rows = [organization('1000002', '서울특별시 중구 세무과', '세무과')]
         with patch('finder.request', return_value=(response(rows), 'ignored')):
             result = finder.find_department('서울 중구', public_key='sample')
-        self.assertEqual(result['status'], '조직 후보')
+        self.assertEqual(result['status'], '담당업무 미확인')
+        self.assertEqual(finder.recommended_candidate(result), {})
         self.assertFalse(result['confirmed'])
         self.assertFalse(result['candidates'][0]['duty_verified'])
         self.assertNotIn('sample', json.dumps(result, ensure_ascii=False))
@@ -127,6 +136,49 @@ class PublicApiTests(unittest.TestCase):
             result = finder.find_department('경기도 수원시', source_url='https://city.go.kr/tax', public_key='sample')
         self.assertNotIn('org_code', result['candidates'][0])
         self.assertEqual(len(result['candidates']), 2)
+
+    def test_organization_response_order_never_selects_finance_for_export(self):
+        rows = [organization('1000000', '서울특별시 중구', '중구'),
+                organization('1000001', '서울특별시 중구 재무과', '재무과', '1000000'),
+                organization('1000002', '서울특별시 중구 세무1과', '세무1과', '1000000'),
+                organization('1000003', '서울특별시 중구 세무2과', '세무2과', '1000000')]
+        with patch('finder.request', return_value=(response(rows), 'ignored')):
+            result = finder.find_department('서울 중구', public_key='sample')
+        self.assertEqual(result['candidates'][0]['department'], '재무과')
+        self.assertEqual(finder.recommended_candidate(result), {})
+        import csv
+        import io
+        exported = list(csv.DictReader(io.StringIO(app.csv_bytes([result]).decode('utf-8-sig'))))[0]
+        for column in ('상위 국', '담당 부서', '팀', '전화번호', '공문 수신처', '기관코드'):
+            self.assertEqual(exported[column], '')
+        self.assertIn('세무2과', exported['조직 후보 목록(담당업무 미확인)'])
+        self.assertEqual(exported['상태'], '담당업무 미확인')
+        # Existing saved sessions with the old status obey the same rule.
+        result['status'] = '조직 후보'
+        self.assertEqual(finder.recommended_candidate(result), {})
+
+    def test_bupyeong_follows_live_department_links_instead_of_fixed_answer(self):
+        root = 'https://www.icbp.go.kr/main/introduction/guidance/organization.jsp'
+        base = 'https://www.icbp.go.kr/main/organization/organizationInfoList.do?orgno0=1&orgno1='
+        organization_page = '<title>인천광역시 부평구 조직도</title><main><ul><li><a href="#">기획문화국</a><ul><li><a href="'+base+'96">재무과</a></li><li><a href="'+base+'111">세무1과</a></li><li><a href="'+base+'129">세무2과</a></li></ul></li></ul></main>'
+        rows = [organization('3540000', '인천광역시 부평구', '부평구'), organization('3540180', '인천광역시 부평구 기획문화국', '기획문화국', '3540000'), organization('3540184', '인천광역시 부평구 기획문화국 재무과', '재무과', '3540180'), organization('3540185', '인천광역시 부평구 기획문화국 세무1과', '세무1과', '3540180'), organization('3540186', '인천광역시 부평구 기획문화국 세무2과', '세무2과', '3540180')]
+        for duty_department, duty_id in [('세무2과', '129'), ('세무1과', '111')]:
+            with self.subTest(duty_department=duty_department):
+                pages = {root: organization_page}
+                for dept, number in [('재무과','96'),('세무1과','111'),('세무2과','129')]:
+                    duty = '<div class="para_line"><p class="bl02">'+dept+' &gt; 지방소득세팀</p></div><div class="para_line"><div class="tableBox"><table><tr><td>팀장</td><td>032-509-6281</td><td>지방소득세팀 업무총괄</td></tr><tr><td>주무관</td><td>032-509-6287</td><td>법인지방소득세 부과 및 징수</td></tr></table></div></div>' if number == duty_id else '<p>다른 업무</p>'
+                    pages[base+number] = '<title>인천광역시 부평구 '+dept+'</title><div id="detail_con">'+duty+'</div>'
+                def request(url, **kwargs):
+                    return (response(rows), '') if kwargs.get('api') else (pages[url], url)
+                with patch('finder.request', side_effect=request):
+                    result = finder.find_department('인천 부평', public_key='sample')
+                recommended = finder.recommended_candidate(result)
+                self.assertEqual(recommended['department'], duty_department)
+                self.assertEqual(recommended['bureau'], '기획문화국')
+                self.assertEqual(recommended['team'], '지방소득세팀')
+                self.assertEqual(recommended['phone'], '032-509-6281')
+                self.assertTrue(recommended['duty_verified'])
+                self.assertTrue(all(c['department'] == duty_department for c in result['candidates'] if finder.has_duty_evidence(c)))
 
     def test_saving_one_provider_preserves_other_values(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(app, 'ROOT', Path(directory)):

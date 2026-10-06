@@ -127,6 +127,10 @@ class OrgClient:
                     chain.append(parent)
                     if not bureau and BUREAU.fullmatch(compact(parent.get("low_nm", ""))):
                         bureau = compact(parent["low_nm"])
+                        # The nearest verified bureau answers this query.
+                        # Municipal root rows may be omitted by this API;
+                        # querying above the bureau adds no relevant evidence.
+                        break
                     parent_code = parent.get("high_cd", "")
             except ValueError as exc:
                 if str(exc) not in notes:

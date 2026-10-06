@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from finder import find_department, stamp, location_key
+from finder import find_department, stamp, location_key, recommended_candidate
 from workbook import read_workbook
 
 ROOT = Path(__file__).resolve().parent
@@ -104,17 +104,20 @@ def run_job(job_id, locations, kind, sources):
 def csv_bytes(rows):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream)
-    writer.writerow(["입력 지자체", "확인 기관명", "상위 국", "담당 부서", "팀", "전화번호", "담당업무", "공문 수신처", "상태", "업무 근거 URL", "조직도 URL", "조회 시각", "사용자 확인 시각", "검토 메모", "기관코드", "기관코드 전체명", "기관코드 자료 URL"])
+    writer.writerow(["입력 지자체", "확인 기관명", "상위 국", "담당 부서", "팀", "전화번호", "담당업무", "공문 수신처", "상태", "업무 근거 URL", "조직도 URL", "조회 시각", "사용자 확인 시각", "검토 메모", "기관코드", "기관코드 전체명", "기관코드 자료 URL", "조직 후보 목록(담당업무 미확인)"])
     for row in rows:
-        selected = row.get("selected", {})
         # Unconfirmed rows remain visible in export but never receive an
         # apparently final recipient assembled from an automatic suggestion.
-        candidate = selected or next(iter(row.get("candidates", [])), {})
+        candidate = recommended_candidate(row)
+        organizations = [c for c in row.get("candidates", []) if c.get("duty_verified") is False]
         evidence = candidate.get("evidence", [])
         org_url = next((e["url"] for e in evidence if e["type"] == "조직도"), "")
-        api_url = next((e["url"] for e in evidence if e["type"] == "기관코드 API"), "")
+        api_evidence = evidence or [e for c in organizations for e in c.get("evidence", [])]
+        api_url = next((e["url"] for e in api_evidence if e["type"] == "기관코드 API"), "")
         duty_url = candidate.get("url", "") if candidate.get("duty_verified") is not False else ""
-        values = [row["location"], row.get("canonical", ""), candidate.get("bureau", ""), candidate.get("department", ""), candidate.get("team", ""), candidate.get("phone", ""), candidate.get("duty", ""), row.get("recipient", "") if row.get("confirmed") else "", "사용자 확인" if row.get("confirmed") else row["status"], duty_url, org_url, row.get("checked_at", ""), row.get("confirmed_at", ""), " / ".join(row.get("notes", [])), candidate.get("org_code", ""), candidate.get("org_full_name", ""), api_url]
+        status = "사용자 확인" if row.get("confirmed") else "담당업무 미확인" if organizations and not candidate else row["status"]
+        organization_list = " / ".join(c.get("org_full_name", c.get("department", "")) + (f" [{c['org_code']}]" if c.get("org_code") else "") for c in organizations)
+        values = [row["location"], row.get("canonical", ""), candidate.get("bureau", ""), candidate.get("department", ""), candidate.get("team", ""), candidate.get("phone", ""), candidate.get("duty", ""), row.get("recipient", "") if row.get("confirmed") else "", status, duty_url, org_url, row.get("checked_at", ""), row.get("confirmed_at", ""), " / ".join(row.get("notes", [])), candidate.get("org_code", ""), candidate.get("org_full_name", ""), api_url, organization_list]
         # Prevent spreadsheet formula execution when a filename, website or
         # user-entered recipient begins with a spreadsheet control character.
         writer.writerow(["'" + str(v) if str(v).startswith(("=", "+", "-", "@", "\t", "\r", "\n")) else str(v) for v in values])
